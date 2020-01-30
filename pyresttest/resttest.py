@@ -9,6 +9,7 @@ import json
 import csv
 import logging
 import threading
+from subprocess import Popen, PIPE
 from optparse import OptionParser
 from email import message_from_string  # For headers handling
 import time
@@ -333,6 +334,7 @@ def run_test(mytest, test_config=TestConfig(), context=None, curl_handle=None, *
         curl.setopt(pycurl.SSL_VERIFYHOST, 0)
 
     result.passed = None
+    result.response_time = 0
 
     if test_config.interactive:
         print("===================================")
@@ -375,6 +377,10 @@ def run_test(mytest, test_config=TestConfig(), context=None, curl_handle=None, *
 
     response_code = curl.getinfo(pycurl.RESPONSE_CODE)
     result.response_code = response_code
+
+    response_time = curl.getinfo(pycurl.TOTAL_TIME)
+    if response_time:
+        result.response_time = response_time
 
     logger.debug("Initial Test Result, based on expected response code: " +
                  str(response_code in mytest.expected_status))
@@ -630,6 +636,7 @@ def run_testsets(testsets):
     total_failures = 0
     myinteractive = False
     curl_handle = pycurl.Curl()
+    data= []
 
     for testset in testsets:
         mytests = testset.tests
@@ -662,10 +669,14 @@ def run_testsets(testsets):
             result = run_test(test, test_config=myconfig, context=context, curl_handle=curl_handle)
             result.body = None  # Remove the body, save some memory!
 
+            data.append("- pyresttest.response_time[\"%s\"] %s" % (test.name, result.response_time))
+
             if not result.passed:  # Print failure, increase failure counts for that test group
                 # Use result test URL to allow for templating
                 logger.error('Test Failed: ' + test.name + " URL=" + result.test.url +
                              " Group=" + test.group + " HTTP Status Code: " + str(result.response_code))
+
+                data.append("- pyresttest.status[\"%s\"] %s" % (test.name, "0"))
 
                 # Print test failure reasons
                 if result.failures:
@@ -682,6 +693,8 @@ def run_testsets(testsets):
             else:  # Test passed, print results
                 logger.info('Test Succeeded: ' + test.name +
                             " URL=" + test.url + " Group=" + test.group)
+
+                data.append("- pyresttest.status[\"%s\"] %s" % (test.name, "1"))
 
             # Add results for this test group to the resultset
             group_results[test.group].append(result)
@@ -715,6 +728,10 @@ def run_testsets(testsets):
                 write_method(my_file, benchmark_result,
                              benchmark, test_config=myconfig)
                 my_file.close()
+
+
+    sender_data_str = '\n'.join(data)
+    zabbix_sender(sender_data_str)
 
     if myinteractive:
         # a break for when interactive bits are complete, before summary data
@@ -791,6 +808,36 @@ except ImportError as ie:
     logging.debug(
         "Failed to load jmespath extractor, make sure the jmespath module is installed if you wish to use jmespath extractor.")
 
+
+def zabbix_sender(sender_data_str):
+    zabbix_sender = '/usr/bin/zabbix_sender'
+    zabbix_config = '/etc/zabbix/zabbix_agentd.conf'
+
+    if not os.path.exists(zabbix_sender):
+        logging.error("No zabbix_sender is found at %s, skip zabbix notification" % zabbix_sender)
+        return
+
+    # verbose sender output
+    senderProc = Popen([zabbix_sender, '-vv', '-c', zabbix_config, '-i', '-'], stdin=PIPE, universal_newlines=True)
+    senderProc.communicate(input=sender_data_str)
+
+    # for debug
+    #fh = open('/tmp/pyresttest.tmp','w')
+    #fh.write(sender_data_str)
+    #fh.close()
+
+def discovery(test_structure):
+    data= []
+    for node in test_structure:  # Iterate through lists of test and configuration elements
+        if isinstance(node, dict):  # Each config element is a miniature key-value dictionary
+            for key in node:
+                if key == u'test':  # Complex test with additional parameters
+                    tests = node[key][0]['name']
+                    data += [{'{#TEST_NAME}':tests}]
+
+    return json.dumps({'data':data},indent=4)
+
+
 def main(args):
     """
     Execute a test against the given base url.
@@ -821,6 +868,10 @@ def main(args):
 
     test_file = args['test']
     test_structure = read_test_file(test_file)
+
+    if 'discovery' in args and args['discovery']:
+        print discovery(test_structure)
+        sys.exit(0)
 
     my_vars = None
     if 'vars' in args and args['vars'] is not None:
@@ -891,6 +942,8 @@ def parse_command_line_args(args_in):
                       action="store_true", dest="absolute_urls")
     parser.add_option(u'--skip_term_colors', help='Turn off the output term colors',
                       action='store_true', default=False, dest="skip_term_colors")
+    parser.add_option(u'--discovery', help='Run discovery mode',
+                      action='store_true', default=False, dest="discovery")
 
     (args, unparsed_args) = parser.parse_args(args_in)
     args = vars(args)
