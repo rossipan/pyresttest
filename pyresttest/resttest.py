@@ -670,6 +670,7 @@ def run_testsets(testsets):
             #result.body = None  # Remove the body, save some memory!
 
             data.append("- pyresttest.response_time[\"%s\"] %s" % (test.name, result.response_time))
+            data.append("- pyresttest.response_code[\"%s\"] %s" % (test.name, response_code))
 
             if not result.passed:  # Print failure, increase failure counts for that test group
                 # Use result test URL to allow for templating
@@ -677,7 +678,6 @@ def run_testsets(testsets):
                              " Group=" + test.group + " HTTP Status Code: " + str(result.response_code))
 
                 data.append("- pyresttest.status[\"%s\"] %s" % (test.name, "0"))
-                data.append("- pyresttest.response_code[\"%s\"] %s" % (test.name, response_code))
                 data.append("- pyresttest.body[\"%s\"] %s" % (test.name, body))
 
                 # Print test failure reasons
