@@ -667,7 +667,7 @@ def run_testsets(testsets):
                 group_failure_counts[test.group] = 0
 
             result = run_test(test, test_config=myconfig, context=context, curl_handle=curl_handle)
-            result.body = None  # Remove the body, save some memory!
+            #result.body = None  # Remove the body, save some memory!
 
             data.append("- pyresttest.response_time[\"%s\"] %s" % (test.name, result.response_time))
 
@@ -677,6 +677,8 @@ def run_testsets(testsets):
                              " Group=" + test.group + " HTTP Status Code: " + str(result.response_code))
 
                 data.append("- pyresttest.status[\"%s\"] %s" % (test.name, "0"))
+                data.append("- pyresttest.response_code[\"%s\"] %s" % (test.name, response_code))
+                data.append("- pyresttest.body[\"%s\"] %s" % (test.name, body))
 
                 # Print test failure reasons
                 if result.failures:
